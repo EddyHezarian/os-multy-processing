@@ -9,6 +9,10 @@
 
 using namespace std;
 
+struct InputParam {
+    int index;
+    int localBestResult;
+};
 struct Task {
     int duration;
     vector<int> workers;
@@ -16,14 +20,12 @@ struct Task {
 
 //? globals
 int taskNumber;
-string filePath = "";
+string filePath = "widgets.txt";
 int workerNumber;
 int processorNumber;
 int expectedTime;
 vector<int> availability;
 vector<int> tasksTimes;
-
-
 
 void readDataFromFile() {
     std::cout << "3: start reading data function\n";
@@ -79,14 +81,14 @@ int calculateBestAnswer(const vector<Task>& tasks, int numTasks, int numWorkers)
     return bestDifference;
 }
 
-void child(int index, int& localBestDifference) {
-    
-    vector<Task> tasks(taskNumber);
+DWORD WINAPI child(void* param) {
+    InputParam* inp = static_cast<InputParam*>(param);
+    int index = inp->index;
 
+    vector<Task> tasks(taskNumber);
     for (int i = 0; i < taskNumber; i++) {
         tasks[i].duration = tasksTimes[i];
     }
-
     int taskindex = 0;
     vector<int> tmp;
     for (int i = 1; i <= taskNumber * workerNumber; i++) {
@@ -103,8 +105,9 @@ void child(int index, int& localBestDifference) {
         }
     }
 
-    localBestDifference = calculateBestAnswer(tasks, taskNumber, workerNumber);
-    cout << "Thread No." << index << " : " << localBestDifference;
+    inp->localBestResult = calculateBestAnswer(tasks, taskNumber, workerNumber);
+    //cout << "Thread No." << index << " : " << inp->localBestResult<<endl;
+    return 0;
 }
 
 int main() {
@@ -112,23 +115,27 @@ int main() {
     readDataFromFile();
 
 
-   vector<thread> threads(processorNumber);
-   vector<int> localResults(processorNumber);
-   std::cout << "2:creating threads\n"<<"______________________\n";
-   for (int i = 0; i < processorNumber; ++i) {
+    vector<InputParam> threadParameters(processorNumber);
+    vector<HANDLE> threadHandles(processorNumber);
 
-        threads[i] = std::thread(child, i, ref(localResults[i]));
+    std::cout << "2:creating threads\n" << "______________________\n";
+    for (int i = 0; i < processorNumber; ++i) {
+        threadParameters[i].index = i;
+        threadHandles[i] = CreateThread(NULL, 0, child, &threadParameters[i], 0, NULL);
+    }
+    WaitForMultipleObjects(threadHandles.size(), threadHandles.data(), TRUE, INFINITE);
+    vector<int>results(processorNumber);
+    for (int i = 0; i < processorNumber; i++) {
+        results[i] = threadParameters[i].localBestResult;
+        cout << "thread No." << i << " best result : " << results[i]<<endl;
     }
 
-    for (auto& t : threads) {
-        t.join();
-    }
-    std::cout << "4: progress completed \n" << "______________________\n";
+    std::cout << "\n\n\n4: progress completed \n" << "______________________\n";
 
-    auto bestResult = std::min_element(localResults.begin(), localResults.end());
-    int minelement = std::distance(localResults.begin(), bestResult);
-    std::cout << "Best cost: " << localResults[minelement]<< endl;
-    std::cout << "calculated by Thread No. " << minelement<< endl;
+    auto bestResult = std::min_element(results.begin(), results.end());
+    int minelement = std::distance(results.begin(), bestResult);
+    std::cout << "Best cost: " << results[minelement] << endl;
+    std::cout << "calculated by Thread No. " << minelement << endl;
 
 
     return 0;
