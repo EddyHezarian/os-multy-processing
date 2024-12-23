@@ -12,6 +12,7 @@ using namespace std;
 struct InputParam {
     int index;
     int localBestResult;
+    vector<int> bestAssigns;
 };
 struct Task {
     int duration;
@@ -51,9 +52,11 @@ void readDataFromFile() {
     cin >> expectedTime;
 }
 
-int calculateBestAnswer(const vector<Task>& tasks, int numTasks, int numWorkers) {
+InputParam calculateBestAnswer(const vector<Task>& tasks, int numTasks, int numWorkers, int index) {
     int bestDifference = 3232131;
     auto start = chrono::steady_clock::now();
+    vector<int> currentAssigns(taskNumber); 
+    vector<int> localBestAssigns(taskNumber);
     while (chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - start).count() < expectedTime) {
         vector<int> workerTimes(numWorkers, 0);
         random_device rd;
@@ -69,22 +72,31 @@ int calculateBestAnswer(const vector<Task>& tasks, int numTasks, int numWorkers)
                 uniform_int_distribution<> dis(0, availableWorkers.size() - 1);
                 int chosenWorker = availableWorkers[dis(gen)];
                 workerTimes[chosenWorker] += tasks[i].duration;
+                currentAssigns[i] = chosenWorker;
             }
         }
         int maxTime = *max_element(workerTimes.begin(), workerTimes.end());
         int minTime = *min_element(workerTimes.begin(), workerTimes.end());
         int difference = maxTime - minTime;
         if (difference < bestDifference) {
+            localBestAssigns = currentAssigns;
             bestDifference = difference;
         }
     }
-    return bestDifference;
+
+    InputParam res;
+    res.bestAssigns.resize(taskNumber);
+    res.bestAssigns = localBestAssigns;
+    res.localBestResult = bestDifference;
+    res.index = index;
+
+    return res;
 }
 
 DWORD WINAPI child(void* param) {
     InputParam* inp = static_cast<InputParam*>(param);
     int index = inp->index;
-
+    inp->bestAssigns.resize(taskNumber);
     vector<Task> tasks(taskNumber);
     for (int i = 0; i < taskNumber; i++) {
         tasks[i].duration = tasksTimes[i];
@@ -105,8 +117,9 @@ DWORD WINAPI child(void* param) {
         }
     }
 
-    inp->localBestResult = calculateBestAnswer(tasks, taskNumber, workerNumber);
-    //cout << "Thread No." << index << " : " << inp->localBestResult<<endl;
+    InputParam res = calculateBestAnswer(tasks, taskNumber, workerNumber, index);
+    inp->localBestResult = res.localBestResult;
+    inp->bestAssigns = res.bestAssigns;
     return 0;
 }
 
@@ -124,18 +137,25 @@ int main() {
         threadHandles[i] = CreateThread(NULL, 0, child, &threadParameters[i], 0, NULL);
     }
     WaitForMultipleObjects(threadHandles.size(), threadHandles.data(), TRUE, INFINITE);
+ 
     vector<int>results(processorNumber);
     for (int i = 0; i < processorNumber; i++) {
         results[i] = threadParameters[i].localBestResult;
-        cout << "thread No." << i << " best result : " << results[i]<<endl;
+        cout << "thread No." << i << " best result : " << results[i] << endl;
     }
 
     std::cout << "\n\n\n4: progress completed \n" << "______________________\n";
 
-    auto bestResult = std::min_element(results.begin(), results.end());
-    int minelement = std::distance(results.begin(), bestResult);
+    auto bestResult = min_element(results.begin(), results.end());
+    int minelement = distance(results.begin(), bestResult);
     std::cout << "Best cost: " << results[minelement] << endl;
     std::cout << "calculated by Thread No. " << minelement << endl;
+
+    std::cout << "best assigns : " << endl;
+
+    for (int i = 0; i < taskNumber; i++) {
+        cout << threadParameters[minelement].bestAssigns[i]<<" - ";
+    }
 
 
     return 0;
