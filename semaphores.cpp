@@ -35,9 +35,17 @@ vector<int> tasksTimes;
 vector<Task> tasks;
 resultFormat globalResult;
 int threadCounter;
-HANDLE resultSemaphore;         
-HANDLE threadCounterSemaphore; 
+HANDLE resultSemaphore;
+HANDLE threadCounterSemaphore;
 HANDLE changeNotifierSemaphore;
+
+HANDLE queue;         
+HANDLE rw;            
+HANDLE accessReaders; 
+
+int readers = 0;
+
+
 
 void readDataFromFile() {
     SYSTEM_INFO sysInfo;
@@ -91,12 +99,13 @@ void readDataFromFile() {
 
 int calculateBestAnswer(int index) {
     auto start = chrono::steady_clock::now();
+    random_device rd;
+    mt19937 gen(rd());
 
     while (chrono::duration_cast<chrono::seconds>(chrono::steady_clock::now() - start).count() < expectedTime) {
         vector<int> workerTimes(workerNumber, 0);
         vector<int>currentAssigns(taskNumber);
-        random_device rd;
-        mt19937 gen(rd());
+
 
         for (int i = 0; i < taskNumber; ++i) {
             vector<int> availableWorkers;
@@ -118,15 +127,22 @@ int calculateBestAnswer(int index) {
         int minTime = *min_element(workerTimes.begin(), workerTimes.end());
         int difference = maxTime - minTime;
 
-        WaitForSingleObject(resultSemaphore, INFINITE);
+       
         if (difference < globalResult.bestResult) {
-            globalResult.bestResult = difference;
-            globalResult.threadIndex = index;
-            globalResult.bestAssigns = currentAssigns;
-
-            ReleaseSemaphore(changeNotifierSemaphore, 1, NULL);
+           
+            WaitForSingleObject(queue, INFINITE);
+            WaitForSingleObject(rw, INFINITE);
+            if (difference < globalResult.bestResult) {
+                globalResult.bestResult = difference;
+                globalResult.bestAssigns = currentAssigns;
+                globalResult.threadIndex = index;
+            }
+            ReleaseSemaphore(rw, 1, NULL); 
+            ReleaseSemaphore(queue, 1, NULL);
+            ReleaseSemaphore(changeNotifierSemaphore, 1, NULL); 
         }
-        ReleaseSemaphore(resultSemaphore, 1, NULL);
+
+
     }
     return 0;
 }
@@ -154,6 +170,11 @@ int main() {
     threadCounterSemaphore = CreateSemaphore(NULL, 1, 1, NULL);
     changeNotifierSemaphore = CreateSemaphore(NULL, 0, processorNumber, NULL);
 
+    queue = CreateSemaphore(NULL, 1,1, NULL);
+    rw = CreateSemaphore(NULL, 1,1, NULL);
+    accessReaders = CreateSemaphore(NULL, 1,1, NULL);
+
+
     vector<InputParam> threadParameters(processorNumber);
     vector<HANDLE> threadHandles(processorNumber);
 
@@ -163,11 +184,29 @@ int main() {
     }
 
     while (true) {
-        WaitForSingleObject(changeNotifierSemaphore, INFINITE); 
-        WaitForSingleObject(resultSemaphore, INFINITE);
-        cout << "Thread " << globalResult.threadIndex + 1 << " found a better result: " << globalResult.bestResult << endl;
-        ReleaseSemaphore(resultSemaphore, 1, NULL);
+        
+        WaitForSingleObject(changeNotifierSemaphore, INFINITE);
+        WaitForSingleObject(queue, INFINITE);
+        WaitForSingleObject(accessReaders, INFINITE);
+        readers++;
+        if (readers == 1) {
+            WaitForSingleObject(rw, INFINITE);
+        }
+        ReleaseSemaphore(accessReaders, 1, NULL);
+        ReleaseSemaphore(queue, 1, NULL);
 
+       
+        cout << "Thread " << globalResult.threadIndex + 1 << " found a better result: " << globalResult.bestResult << endl;
+
+        
+        WaitForSingleObject(accessReaders, INFINITE);
+        readers--;
+        if (readers == 0) {
+            ReleaseSemaphore(rw, 1, NULL); 
+        }
+        ReleaseSemaphore(accessReaders, 1, NULL);
+
+       
         WaitForSingleObject(threadCounterSemaphore, INFINITE);
         if (threadCounter == 0) {
             ReleaseSemaphore(threadCounterSemaphore, 1, NULL);
@@ -179,11 +218,11 @@ int main() {
     WaitForMultipleObjects(threadHandles.size(), threadHandles.data(), TRUE, INFINITE);
     cout << "\n---------- All threads done thire tasks ----------" << endl;
     cout << "final best result :" << endl;
-    cout << "core: "<< globalResult.threadIndex << "\t best result : "<< globalResult.bestResult << endl;
+    cout << "core: " << globalResult.threadIndex << "\t best result : " << globalResult.bestResult << endl;
     cout << "best assigns :" << endl;
-    for (int i = 0; i < taskNumber  ; i++) {
+    for (int i = 0; i < taskNumber; i++) {
         cout << globalResult.bestAssigns[i] << " - ";
     }
-    
+
     return 0;
 }
